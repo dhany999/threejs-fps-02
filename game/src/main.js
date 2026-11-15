@@ -58,7 +58,13 @@ scene.add(fill);
 const map = createMap(scene);
 const audio = createAudio(state);
 const hud = createHud(state, { onPlay: onPlayPressed, onBuy: buyItem });
-const input = createInput(renderer.domElement, { onLockChange, onKeyDown: handleKeyDown });
+const input = createInput(renderer.domElement, {
+  onLockChange,
+  onKeyDown: handleKeyDown,
+  onLockFailed,
+  onCanvasClick,
+  lockWanted: () => !shot && (state.phase === 'live' || state.phase === 'buy' || state.phase === 'end'),
+});
 const player = createPlayer(state);
 const weapons = createWeapons(state, camera, audio);
 
@@ -155,6 +161,12 @@ function startRound() {
   hud.setScore();
   hud.showBanner('ROUND ' + state.round, 'Plant the charge at the Furnace or eliminate Slag.', 2.5);
   updateAmmoHud();
+  // The round starts unlocked whenever the previous round ended (endRound
+  // exits the lock), so re-request it here: without this the player can
+  // never aim or shoot again after round 1. A browser may refuse a request
+  // with no recent user gesture; that failure falls back to drag-to-look,
+  // and any canvas click retries the real lock.
+  if (!shot) input.requestLock();
 }
 
 function endRound(winner, reason) {
@@ -215,7 +227,7 @@ function checkElimination() {
 function buyItem(item) {
   if (state.phase !== 'buy') return;
   const p = state.player;
-  if (item === 'close') { hud.hideBuy(); return; }
+  if (item === 'close') { hud.hideBuy(); if (!shot) input.requestLock(); return; }
   if (item === 'rifle' && !p.hasRifle && state.money >= WEAPONS.rifle.price) {
     state.money -= WEAPONS.rifle.price;
     p.hasRifle = true;
@@ -262,8 +274,33 @@ function onLockChange(locked) {
   if (shot) return;
   if (locked) {
     hud.hideOverlay();
-  } else if (state.phase === 'live' && state.player.alive) {
+  } else if (state.player.alive && state.phase === 'live') {
     hud.showOverlay('paused');
+  } else if (state.player.alive && (state.phase === 'end' ||
+      (state.phase === 'buy' && !hud.isBuyVisible()))) {
+    // Lock lost between rounds with no buy menu on screen: the player has
+    // no visible way back to a locked mouse, so offer one explicitly.
+    // (During buy with the menu open, its Close button re-locks instead.)
+    hud.showOverlay('resume');
+  }
+}
+
+// Pointer lock was refused even after the delayed retry: mouse look and
+// fire keep working by dragging, so hide the overlay that would block the
+// view and say so — otherwise the fallback is unusable.
+function onLockFailed() {
+  if (shot) return;
+  hud.hideOverlay();
+  hud.showBanner('DRAG TO LOOK', 'Pointer lock was denied — hold the mouse button and drag to aim, click to fire.', 4);
+}
+
+// A click on the canvas itself re-locks the mouse — the recovery path when
+// a round starts unlocked and no overlay is up to click instead.
+function onCanvasClick() {
+  if (shot) return;
+  if ((state.phase === 'live' || state.phase === 'buy' || state.phase === 'end') &&
+      (state.phase !== 'live' || state.player.alive)) {
+    input.requestLock();
   }
 }
 
@@ -275,7 +312,7 @@ function handleKeyDown(code) {
     else if (code === 'Digit2') buyItem('pistol-ammo');
     else if (code === 'Digit3') buyItem('grenade');
     else if (code === 'Digit4') buyItem('armor');
-    else if (code === 'KeyB') hud.hideBuy();
+    else if (code === 'KeyB') { hud.hideBuy(); input.requestLock(); }
   } else if (code === 'KeyB' && state.phase === 'buy') {
     hud.showBuy();
   }
@@ -496,8 +533,10 @@ function frame(now) {
   if (rHeld && !prevReloadKey && state.phase === 'live') weapons.startReload();
   prevReloadKey = rHeld;
 
-  // Firing (render-rate input, sim-rate state).
-  if (state.phase === 'live' && state.player.alive && (input.locked || shot)) {
+  // Firing (render-rate input, sim-rate state). Drag-to-look mode counts
+  // as locked here: the fallback is only engaged when the real lock failed,
+  // and without this the drag fallback could aim but never fire.
+  if (state.phase === 'live' && state.player.alive && (input.locked || input.dragMode || shot)) {
     if (input.firing) {
       const def = weapons.def();
       const auto = state.player.weapon === 'grenade' || (def && def.auto);

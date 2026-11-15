@@ -125,6 +125,12 @@ export function createHud(state, callbacks) {
       els.overlayTitle.textContent = 'PAUSED';
       els.overlayCopy.textContent = 'Click to keep playing. The round clock is still running.';
       els.playBtn.textContent = 'Resume';
+    } else if (kind === 'resume') {
+      // Lock lost outside the live round (round end, or buy phase with the
+      // menu already closed): same button, copy that fits any phase.
+      els.overlayTitle.textContent = 'PAUSED';
+      els.overlayCopy.textContent = 'Your mouse is unlocked. Click to lock it and keep playing.';
+      els.playBtn.textContent = 'Click to resume';
     } else if (kind === 'dead') {
       els.overlayTitle.textContent = 'YOU ARE DOWN';
       els.overlayCopy.textContent = 'Your squad fights on. Click to spectate from your position.';
@@ -140,6 +146,7 @@ export function createHud(state, callbacks) {
     refreshBuy();
   }
   function hideBuy() { els.buyMenu.classList.add('hidden'); }
+  function isBuyVisible() { return !els.buyMenu.classList.contains('hidden'); }
 
   function refreshBuy() {
     els.buyMoney.textContent = '$' + state.money;
@@ -201,7 +208,7 @@ export function createHud(state, callbacks) {
   return {
     setHealth, setAmmo, setMoney, setTimer, setScore, setAlive,
     setWeaponName, setCrosshair, hitMarker, damageFlash, addFeed,
-    showBanner, hideBanner, showOverlay, hideOverlay, showBuy, hideBuy,
+    showBanner, hideBanner, showOverlay, hideOverlay, showBuy, hideBuy, isBuyVisible,
     refreshBuy, showEnd, hideEnd, setBombStatus, setHint, tick,
   };
 }
